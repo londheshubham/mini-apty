@@ -1,6 +1,7 @@
 import express from "express";
 import { AppDataSource } from "./config/datasource";
 import authRoutes from "./routes/auth.routes";
+import walkthroughRoutes from "./routes/walkthrough.routes";
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.get("/health", (_req, res) => {
   });
 });
 app.use("/auth", authRoutes);
+app.use("/walkthroughs", walkthroughRoutes);
 
 AppDataSource.initialize()
   .then(() => {

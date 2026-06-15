@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from "typeorm";
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  OneToMany,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from "typeorm";
 
 import { Walkthrough } from "./Walkthrough";
 
@@ -15,4 +22,10 @@ export class User {
 
   @OneToMany(() => Walkthrough, (walkthrough) => walkthrough.owner)
   walkthroughs!: Walkthrough[];
+
+  @CreateDateColumn()
+  createdAt!: Date;
+
+  @UpdateDateColumn()
+  updatedAt!: Date;
 }
