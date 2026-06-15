@@ -8,7 +8,7 @@ import {
   UpdateWalkthroughInput,
 } from "../validations/walkthrough.validation";
 
-const walkthroughRepository = AppDataSource.getRepository(Walkthrough);
+const getWalkthroughRepository = () => AppDataSource.getRepository(Walkthrough);
 
 const serializeWalkthrough = (walkthrough: Walkthrough) => ({
   id: walkthrough.id,
@@ -21,6 +21,7 @@ const serializeWalkthrough = (walkthrough: Walkthrough) => ({
 });
 
 const findOwnedWalkthrough = async (id: string, ownerId: string) => {
+  const walkthroughRepository = getWalkthroughRepository();
   const walkthrough = await walkthroughRepository.findOne({
     where: {
       id,
@@ -45,6 +46,7 @@ export const createWalkthroughService = async (
   ownerId: string,
   input: CreateWalkthroughInput,
 ) => {
+  const walkthroughRepository = getWalkthroughRepository();
   const walkthrough = walkthroughRepository.create({
     ...input,
     owner: {
@@ -61,6 +63,7 @@ export const listWalkthroughsService = async (
   ownerId: string,
   query: ListWalkthroughsQuery,
 ) => {
+  const walkthroughRepository = getWalkthroughRepository();
   const walkthroughs = await walkthroughRepository.find({
     where: {
       owner: {
@@ -89,6 +92,7 @@ export const updateWalkthroughService = async (
   input: UpdateWalkthroughInput,
 ) => {
   const walkthrough = await findOwnedWalkthrough(id, ownerId);
+  const walkthroughRepository = getWalkthroughRepository();
 
   walkthroughRepository.merge(walkthrough, input);
 
@@ -99,6 +103,7 @@ export const updateWalkthroughService = async (
 
 export const deleteWalkthroughService = async (ownerId: string, id: string) => {
   const walkthrough = await findOwnedWalkthrough(id, ownerId);
+  const walkthroughRepository = getWalkthroughRepository();
 
   await walkthroughRepository.remove(walkthrough);
 };

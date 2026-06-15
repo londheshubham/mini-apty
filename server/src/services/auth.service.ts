@@ -5,9 +5,10 @@ import { AppDataSource } from "../config/datasource";
 import { User } from "../entities/User";
 import { AppError } from "../errors/AppError";
 
-const userRepository = AppDataSource.getRepository(User);
+const getUserRepository = () => AppDataSource.getRepository(User);
 
 export const signupService = async (email: string, password: string) => {
+  const userRepository = getUserRepository();
   const existingUser = await userRepository.findOne({
     where: {
       email,
@@ -36,6 +37,7 @@ export const signupService = async (email: string, password: string) => {
 };
 
 export const loginService = async (email: string, password: string) => {
+  const userRepository = getUserRepository();
   const user = await userRepository.findOne({
     where: {
       email,
