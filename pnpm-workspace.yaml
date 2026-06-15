@@ -3,3 +3,4 @@ packages:
   - "extension"
 allowBuilds:
   bcrypt: false
+  esbuild: true
