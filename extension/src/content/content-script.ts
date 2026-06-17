@@ -1,7 +1,23 @@
-import { ExtensionMessage, RuntimeMessage } from "../shared/messages";
+import {
+  ExtensionMessage,
+  RuntimeMessage,
+  WalkthroughPlayback,
+} from "../shared/messages";
 import { isCaptureActive, startCapture, stopCapture } from "./capture";
 import { ensureOverlayRoot } from "./overlay";
 import { startPlayback, stopPlayback } from "./playback";
+
+const PLAYBACK_SESSION_STORAGE_KEY = "miniAptyActivePlayback";
+const PLAYBACK_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+
+type PlaybackSession = {
+  href: string;
+  origin: string;
+  pathname: string;
+  walkthrough: WalkthroughPlayback;
+  stepIndex: number;
+  updatedAt: number;
+};
 
 const getPageContext = () => ({
   href: window.location.href,
@@ -19,7 +35,86 @@ const sendRuntimeMessage = (message: RuntimeMessage) => {
   }
 };
 
+const persistPlaybackSession = async (
+  walkthrough: WalkthroughPlayback,
+  stepIndex: number,
+) => {
+  const pageContext = getPageContext();
+
+  try {
+    await chrome.storage.local.set({
+      [PLAYBACK_SESSION_STORAGE_KEY]: {
+        ...pageContext,
+        walkthrough,
+        stepIndex,
+        updatedAt: Date.now(),
+      } satisfies PlaybackSession,
+    });
+  } catch {
+    // Playback should keep working even if extension storage is unavailable.
+  }
+};
+
+const clearPlaybackSession = async () => {
+  try {
+    await chrome.storage.local.remove(PLAYBACK_SESSION_STORAGE_KEY);
+  } catch {
+    // Nothing to clean up if the extension context is already gone.
+  }
+};
+
+const readPlaybackSession = async () => {
+  try {
+    const stored = await chrome.storage.local.get(PLAYBACK_SESSION_STORAGE_KEY);
+
+    return stored[PLAYBACK_SESSION_STORAGE_KEY] as PlaybackSession | undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const isPlaybackSessionForCurrentPage = (session: PlaybackSession) => {
+  const pageContext = getPageContext();
+
+  return (
+    session.href === pageContext.href &&
+    session.origin === pageContext.origin &&
+    session.pathname === pageContext.pathname
+  );
+};
+
+const getPlaybackOptions = () => ({
+  isCaptureActive,
+  stopCapture,
+  onStepChange: (walkthrough: WalkthroughPlayback, stepIndex: number) => {
+    void persistPlaybackSession(walkthrough, stepIndex);
+  },
+  onStop: () => {
+    void clearPlaybackSession();
+  },
+});
+
+const restorePlaybackSession = async () => {
+  const session = await readPlaybackSession();
+
+  if (!session) {
+    return;
+  }
+
+  if (Date.now() - session.updatedAt > PLAYBACK_SESSION_TTL_MS) {
+    void clearPlaybackSession();
+    return;
+  }
+
+  if (!isPlaybackSessionForCurrentPage(session)) {
+    return;
+  }
+
+  startPlayback(session.walkthrough, getPlaybackOptions(), session.stepIndex);
+};
+
 ensureOverlayRoot();
+void restorePlaybackSession();
 
 chrome.runtime.onMessage.addListener(
   (
@@ -57,10 +152,7 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === "MINI_APTY_PLAY_WALKTHROUGH") {
-      const didStart = startPlayback(message.walkthrough, {
-        isCaptureActive,
-        stopCapture,
-      });
+      const didStart = startPlayback(message.walkthrough, getPlaybackOptions());
 
       sendResponse(
         didStart

@@ -20,11 +20,14 @@ const TARGET_RETRY_INTERVAL_MS = 150;
 type PlaybackOptions = {
   isCaptureActive: () => boolean;
   stopCapture: () => void;
+  onStepChange?: (walkthrough: WalkthroughPlayback, stepIndex: number) => void;
+  onStop?: () => void;
 };
 
 let activePlayback: {
   walkthrough: WalkthroughPlayback;
   stepIndex: number;
+  options: PlaybackOptions;
 } | null = null;
 let playbackFrame = 0;
 let targetRetryTimer = 0;
@@ -135,7 +138,7 @@ const showPlaybackStep = () => {
   clearAdvanceTrigger();
 
   const { popover } = getOverlayElements();
-  const { stepIndex, walkthrough } = activePlayback;
+  const { options, stepIndex, walkthrough } = activePlayback;
   const step = walkthrough.steps[stepIndex];
   syncActiveStepWait(walkthrough, stepIndex, step);
 
@@ -156,6 +159,7 @@ const showPlaybackStep = () => {
   }
 
   setBadgeText(`Playing: ${walkthrough.name}`);
+  options.onStepChange?.(walkthrough, stepIndex);
 
   const header = document.createElement("div");
   header.className = "mini-apty-popover-header";
@@ -321,6 +325,7 @@ const schedulePlaybackUpdate = () => {
 
 export const stopPlayback = () => {
   const { popover } = getOverlayElements();
+  const stopCallback = activePlayback?.options.onStop;
 
   clearTargetRetry();
   clearAdvanceTrigger();
@@ -340,6 +345,7 @@ export const stopPlayback = () => {
 
   updateHighlight(null);
   setBadgeText("Mini Apty ready");
+  stopCallback?.();
   window.removeEventListener("scroll", schedulePlaybackUpdate, true);
   window.removeEventListener("resize", schedulePlaybackUpdate, true);
 };
@@ -347,6 +353,7 @@ export const stopPlayback = () => {
 export const startPlayback = (
   walkthrough: WalkthroughPlayback,
   options: PlaybackOptions,
+  startStepIndex = 0,
 ) => {
   if (walkthrough.steps.length === 0) {
     return false;
@@ -357,9 +364,15 @@ export const startPlayback = (
   }
 
   stopPlayback();
+  const stepIndex = Math.min(
+    Math.max(Math.trunc(startStepIndex), 0),
+    walkthrough.steps.length - 1,
+  );
+
   activePlayback = {
     walkthrough,
-    stepIndex: 0,
+    stepIndex,
+    options,
   };
 
   window.addEventListener("scroll", schedulePlaybackUpdate, true);
