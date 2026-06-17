@@ -6,10 +6,20 @@ const advanceTriggerSchema = z.enum([
   "input-change",
 ]);
 
+const pointerStrategySchema = z.enum([
+  "attribute-selector",
+  "id-selector",
+  "css-selector",
+  "dom-path",
+]);
+
 const elementPointerSchema = z.object({
-  strategy: z.string().min(1),
+  strategy: pointerStrategySchema.or(z.string().min(1)),
   selector: z.string().min(1),
+  candidateSelectors: z.array(z.string().min(1)).optional(),
+  fallbackPath: z.string().min(1).optional(),
   text: z.string().optional(),
+  textFingerprint: z.string().optional(),
   role: z.string().optional(),
   tagName: z.string().optional(),
   attributes: z.record(z.string(), z.string()).optional(),

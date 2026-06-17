@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 
 import {
   ContentResponse,
+  ExtensionMessage,
   pageContextSchema,
   PageContext,
 } from "../shared/messages";
 import { useAuthStore } from "../stores/auth.store";
+import { AuthorPanel } from "./AuthorPanel";
 import { AuthPanel } from "./AuthPanel";
 
 const getActiveTab = async () => {
@@ -47,6 +49,13 @@ const sendPageContextMessage = async (tabId: number) => {
   })) as ContentResponse;
 };
 
+const sendContentScriptMessage = async (
+  tabId: number,
+  message: ExtensionMessage,
+) => {
+  return (await chrome.tabs.sendMessage(tabId, message)) as ContentResponse;
+};
+
 const requestPageContext = async () => {
   const tab = await getActiveTab();
 
@@ -72,6 +81,33 @@ const requestPageContext = async () => {
   }
 
   return pageContextSchema.parse(response.pageContext);
+};
+
+const sendCaptureCommand = async (
+  type: "MINI_APTY_START_CAPTURE" | "MINI_APTY_STOP_CAPTURE",
+) => {
+  const tab = await getActiveTab();
+
+  if (!tab.id) {
+    throw new Error("No active tab found");
+  }
+
+  if (!canInjectIntoTab(tab.url)) {
+    throw new Error("Open an http or https page to use Mini Apty");
+  }
+
+  let response: ContentResponse;
+
+  try {
+    response = await sendContentScriptMessage(tab.id, { type });
+  } catch {
+    await injectContentScript(tab.id);
+    response = await sendContentScriptMessage(tab.id, { type });
+  }
+
+  if (!response.ok) {
+    throw new Error(response.error);
+  }
 };
 
 export const App = () => {
@@ -103,7 +139,6 @@ export const App = () => {
     void loadPageContext();
     void loadSession();
   }, []);
-
 
   return (
     <main className="app-shell">
@@ -143,13 +178,11 @@ export const App = () => {
 
       <AuthPanel />
 
-      <section className="panel-section">
-        <h2>Next slice</h2>
-        <p className="muted">
-          After this shell builds and loads, we will add auth and backend API
-          wiring.
-        </p>
-      </section>
+      <AuthorPanel
+        pageContext={pageContext}
+        onStartCapture={() => sendCaptureCommand("MINI_APTY_START_CAPTURE")}
+        onStopCapture={() => sendCaptureCommand("MINI_APTY_STOP_CAPTURE")}
+      />
     </main>
   );
 };
