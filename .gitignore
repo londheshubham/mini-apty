@@ -3,3 +3,7 @@
 /server/dist
 /extension/node_modules
 /extension/dist
+.env
+.env.*
+!.env.example
+!.env.example.*
