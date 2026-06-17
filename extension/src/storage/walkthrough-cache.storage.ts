@@ -69,3 +69,25 @@ export const cacheWalkthrough = async (
     },
   });
 };
+
+export const removeCachedWalkthrough = async (
+  userId: string,
+  walkthrough: Walkthrough,
+) => {
+  const cache = await readCache();
+  const cacheKey = getCacheKey(walkthrough);
+  const userCache = cache[userId] ?? {};
+  const cachedWalkthroughs = userCache[cacheKey] ?? [];
+
+  await chrome.storage.local.set({
+    [WALKTHROUGH_CACHE_STORAGE_KEY]: {
+      ...cache,
+      [userId]: {
+        ...userCache,
+        [cacheKey]: cachedWalkthroughs.filter(
+          (item) => item.id !== walkthrough.id,
+        ),
+      },
+    },
+  });
+};

@@ -106,3 +106,10 @@ export const updateWalkthrough = async (
 
   return walkthroughSchema.parse(response);
 };
+
+export const deleteWalkthrough = async (token: string, id: string) => {
+  await apiRequest<void>(`/walkthroughs/${id}`, {
+    method: "DELETE",
+    token,
+  });
+};

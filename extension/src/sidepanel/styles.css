@@ -309,7 +309,8 @@ h4 {
   gap: 8px;
 }
 
-.saved-walkthrough-actions .secondary-button {
+.saved-walkthrough-actions .secondary-button,
+.saved-walkthrough-actions .text-button {
   padding: 6px 8px;
   font-size: 12px;
 }

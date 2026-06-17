@@ -29,7 +29,13 @@ export const apiRequest = async <T>(
       await normalizeApiError(response);
     }
 
-    return (await response.json()) as T;
+    const responseText = await response.text();
+
+    if (!responseText) {
+      return undefined as T;
+    }
+
+    return JSON.parse(responseText) as T;
   } catch (error: unknown) {
     throw normalizeUnknownError(error);
   }

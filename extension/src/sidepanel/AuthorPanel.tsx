@@ -9,6 +9,7 @@ import {
 import { ApiError } from "../api/errors";
 import {
   createWalkthrough,
+  deleteWalkthrough,
   listWalkthroughs,
   updateWalkthrough,
   Walkthrough,
@@ -17,6 +18,7 @@ import {
   cacheWalkthrough,
   cacheWalkthroughs,
   getCachedWalkthroughs,
+  removeCachedWalkthrough,
 } from "../storage/walkthrough-cache.storage";
 import { useAuthStore } from "../stores/auth.store";
 import { useRecordingStore } from "../stores/recording.store";
@@ -99,7 +101,11 @@ export const AuthorPanel = ({
   const [playingWalkthroughId, setPlayingWalkthroughId] = useState<
     string | null
   >(null);
+  const [deletingWalkthroughId, setDeletingWalkthroughId] = useState<
+    string | null
+  >(null);
   const [playError, setPlayError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isRecording = status === "recording";
   const canSave =
@@ -115,6 +121,7 @@ export const AuthorPanel = ({
     setSaveError(null);
     setSavedWalkthroughId(null);
     setPlayError(null);
+    setDeleteError(null);
   }, [pageContext?.origin, pageContext?.pathname]);
 
   useEffect(() => {
@@ -309,6 +316,35 @@ export const AuthorPanel = ({
     }
   };
 
+  const handleDeleteWalkthrough = async (walkthrough: Walkthrough) => {
+    if (!token || !user) {
+      return;
+    }
+
+    setDeletingWalkthroughId(walkthrough.id);
+    setDeleteError(null);
+
+    try {
+      await deleteWalkthrough(token, walkthrough.id);
+      setSavedWalkthroughs((currentWalkthroughs) =>
+        currentWalkthroughs.filter((item) => item.id !== walkthrough.id),
+      );
+      void removeCachedWalkthrough(user.id, walkthrough).catch(() => undefined);
+
+      if (savedWalkthroughId === walkthrough.id) {
+        setSavedWalkthroughId(null);
+      }
+    } catch (deleteErrorUnknown: unknown) {
+      setDeleteError(
+        deleteErrorUnknown instanceof Error
+          ? deleteErrorUnknown.message
+          : "Could not delete walkthrough",
+      );
+    } finally {
+      setDeletingWalkthroughId(null);
+    }
+  };
+
   return (
     <section className="panel-section author-panel">
       <div className="author-header">
@@ -370,6 +406,13 @@ export const AuthorPanel = ({
             </div>
           ) : null}
 
+          {deleteError ? (
+            <div className="error-box">
+              <strong>Delete error</strong>
+              <span>{deleteError}</span>
+            </div>
+          ) : null}
+
           {savedWalkthroughs.length > 0 ? (
             <div className="saved-walkthrough-list">
               {savedWalkthroughs.map((walkthrough) => (
@@ -391,11 +434,26 @@ export const AuthorPanel = ({
                       type="button"
                       className="secondary-button"
                       disabled={
-                        isRecording || playingWalkthroughId === walkthrough.id
+                        isRecording ||
+                        playingWalkthroughId === walkthrough.id ||
+                        deletingWalkthroughId === walkthrough.id
                       }
                       onClick={() => void handlePlayWalkthrough(walkthrough)}
                     >
                       {playingWalkthroughId === walkthrough.id ? "Playing..." : "Play"}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button danger-button"
+                      disabled={
+                        playingWalkthroughId === walkthrough.id ||
+                        deletingWalkthroughId === walkthrough.id
+                      }
+                      onClick={() => void handleDeleteWalkthrough(walkthrough)}
+                    >
+                      {deletingWalkthroughId === walkthrough.id
+                        ? "Deleting..."
+                        : "Delete"}
                     </button>
                   </div>
                 </article>
