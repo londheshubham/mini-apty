@@ -139,6 +139,12 @@ export const ensureOverlayRoot = () => {
       overflow-wrap: anywhere;
     }
 
+    .mini-apty-popover-hint {
+      margin: 0;
+      color: #64748b;
+      font-size: 12px;
+    }
+
     .mini-apty-popover-warning {
       margin: 0;
       color: #92400e;

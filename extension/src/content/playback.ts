@@ -10,6 +10,12 @@ import {
   updateHighlight,
 } from "./overlay";
 
+const ADVANCE_TRIGGER_HINTS = {
+  "click-target": "Click the highlighted target to continue.",
+  "input-change": "Change the highlighted field to continue.",
+  "next-button": "Click Next to continue.",
+} satisfies Record<CapturedStep["advanceTrigger"], string>;
+
 type PlaybackOptions = {
   isCaptureActive: () => boolean;
   stopCapture: () => void;
@@ -20,6 +26,7 @@ let activePlayback: {
   stepIndex: number;
 } | null = null;
 let playbackFrame = 0;
+let activeAdvanceCleanup: (() => void) | null = null;
 
 const getVisibleElementsForSelector = (selector: string) => {
   try {
@@ -201,63 +208,17 @@ const createPopoverButton = (
   return button;
 };
 
-const updatePlaybackPlacement = () => {
-  if (!activePlayback) {
-    return;
-  }
-
-  const step = activePlayback.walkthrough.steps[activePlayback.stepIndex];
-  const { popover } = getOverlayElements();
-  const target = resolvePlaybackTarget(step);
-
-  updateHighlight(target);
-
-  if (popover) {
-    void positionPlaybackPopover(target, popover);
-  }
-};
-
-const schedulePlaybackUpdate = () => {
-  if (playbackFrame) {
-    return;
-  }
-
-  playbackFrame = window.requestAnimationFrame(() => {
-    playbackFrame = 0;
-
-    if (!activePlayback) {
-      return;
-    }
-
-    updatePlaybackPlacement();
-  });
-};
-
-export const stopPlayback = () => {
-  const { popover } = getOverlayElements();
-
-  activePlayback = null;
-
-  if (playbackFrame) {
-    window.cancelAnimationFrame(playbackFrame);
-    playbackFrame = 0;
-  }
-
-  if (popover) {
-    popover.replaceChildren();
-    popover.style.display = "none";
-  }
-
-  updateHighlight(null);
-  setBadgeText("Mini Apty ready");
-  window.removeEventListener("scroll", schedulePlaybackUpdate, true);
-  window.removeEventListener("resize", schedulePlaybackUpdate, true);
+const clearAdvanceTrigger = () => {
+  activeAdvanceCleanup?.();
+  activeAdvanceCleanup = null;
 };
 
 const showPlaybackStep = () => {
   if (!activePlayback) {
     return;
   }
+
+  clearAdvanceTrigger();
 
   const { popover } = getOverlayElements();
   const { stepIndex, walkthrough } = activePlayback;
@@ -299,6 +260,11 @@ const showPlaybackStep = () => {
   description.className = "mini-apty-popover-description";
   description.textContent = step.description;
   body.append(description);
+
+  const hint = document.createElement("p");
+  hint.className = "mini-apty-popover-hint";
+  hint.textContent = ADVANCE_TRIGGER_HINTS[step.advanceTrigger];
+  body.append(hint);
 
   if (!target) {
     const warning = document.createElement("p");
@@ -359,7 +325,118 @@ const showPlaybackStep = () => {
 
   popover.replaceChildren(header, body);
   popover.style.display = "block";
+  attachAdvanceTrigger(step, target);
   schedulePlaybackUpdate();
+};
+
+const advancePlayback = () => {
+  if (!activePlayback) {
+    return;
+  }
+
+  const isLastStep =
+    activePlayback.stepIndex === activePlayback.walkthrough.steps.length - 1;
+
+  if (isLastStep) {
+    stopPlayback();
+    return;
+  }
+
+  activePlayback = {
+    ...activePlayback,
+    stepIndex: activePlayback.stepIndex + 1,
+  };
+  showPlaybackStep();
+};
+
+const attachAdvanceTrigger = (
+  step: CapturedStep,
+  target: HTMLElement | null,
+) => {
+  clearAdvanceTrigger();
+
+  if (!target || step.advanceTrigger === "next-button") {
+    return;
+  }
+
+  let didAdvance = false;
+  const handleAdvance = () => {
+    if (didAdvance) {
+      return;
+    }
+
+    didAdvance = true;
+    advancePlayback();
+  };
+
+  if (step.advanceTrigger === "click-target") {
+    target.addEventListener("click", handleAdvance, true);
+    activeAdvanceCleanup = () => {
+      target.removeEventListener("click", handleAdvance, true);
+    };
+    return;
+  }
+
+  target.addEventListener("input", handleAdvance, true);
+  target.addEventListener("change", handleAdvance, true);
+  activeAdvanceCleanup = () => {
+    target.removeEventListener("input", handleAdvance, true);
+    target.removeEventListener("change", handleAdvance, true);
+  };
+};
+
+const updatePlaybackPlacement = () => {
+  if (!activePlayback) {
+    return;
+  }
+
+  const step = activePlayback.walkthrough.steps[activePlayback.stepIndex];
+  const { popover } = getOverlayElements();
+  const target = resolvePlaybackTarget(step);
+
+  updateHighlight(target);
+
+  if (popover) {
+    void positionPlaybackPopover(target, popover);
+  }
+};
+
+const schedulePlaybackUpdate = () => {
+  if (playbackFrame) {
+    return;
+  }
+
+  playbackFrame = window.requestAnimationFrame(() => {
+    playbackFrame = 0;
+
+    if (!activePlayback) {
+      return;
+    }
+
+    updatePlaybackPlacement();
+  });
+};
+
+export const stopPlayback = () => {
+  const { popover } = getOverlayElements();
+
+  clearAdvanceTrigger();
+  activePlayback = null;
+
+  if (playbackFrame) {
+    window.cancelAnimationFrame(playbackFrame);
+    playbackFrame = 0;
+  }
+
+  if (popover) {
+    popover.replaceChildren();
+    popover.style.display = "none";
+  }
+
+  updateHighlight(null);
+  setBadgeText("Mini Apty ready");
+  window.removeEventListener("scroll", schedulePlaybackUpdate, true);
+  window.removeEventListener("resize", schedulePlaybackUpdate, true);
 };
 
 export const startPlayback = (
