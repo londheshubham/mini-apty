@@ -417,7 +417,7 @@ export const AuthorPanel = ({
             <div className="saved-walkthrough-list">
               {savedWalkthroughs.map((walkthrough) => (
                 <article className="saved-walkthrough" key={walkthrough.id}>
-                  <div>
+                  <div className="saved-walkthrough-content">
                     <h4>{walkthrough.name}</h4>
                     <p className="muted">
                       {walkthrough.steps.length === 1
@@ -466,9 +466,25 @@ export const AuthorPanel = ({
       ) : null}
 
       {steps.length === 0 ? (
-        <p className="muted">Recorded steps will appear here.</p>
+        <div className="draft-empty-state">
+          <strong>{isRecording ? "Recording is active" : "No draft yet"}</strong>
+          <p className="muted">
+            {isRecording
+              ? "Click an element on the page to capture a step."
+              : "Click Record to capture your first step."}
+          </p>
+        </div>
       ) : (
-        <>
+        <section className="draft-editor">
+          <div className="draft-editor-header">
+            <div>
+              <h3>Draft walkthrough</h3>
+              <p className="muted">
+                {steps.length === 1 ? "1 recorded step" : `${steps.length} recorded steps`}
+              </p>
+            </div>
+          </div>
+
           <label className="walkthrough-name-field">
             Walkthrough name
             <input
@@ -564,7 +580,7 @@ export const AuthorPanel = ({
               </article>
             ))}
           </div>
-        </>
+        </section>
       )}
 
       {steps.length > 0 ? (
