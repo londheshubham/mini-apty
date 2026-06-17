@@ -77,6 +77,23 @@ h2 {
   font-size: 14px;
 }
 
+h3,
+h4 {
+  margin: 0;
+}
+
+h3 {
+  color: #1e293b;
+  font-size: 13px;
+}
+
+h4 {
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
 .status-pill {
   max-width: 160px;
   border: 1px solid #cbd5e1;
@@ -249,6 +266,65 @@ h2 {
   gap: 12px;
 }
 
+.saved-walkthroughs {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.saved-walkthroughs-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.saved-walkthrough-list {
+  display: grid;
+  gap: 8px;
+}
+
+.saved-walkthrough {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px;
+}
+
+.saved-walkthrough > div:first-child {
+  min-width: 0;
+}
+
+.saved-walkthrough-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.saved-walkthrough-actions .secondary-button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.cache-pill {
+  flex: 0 0 auto;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .step-list {
   display: grid;
   gap: 10px;
@@ -341,6 +417,10 @@ h2 {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.save-button-wrapper {
+  display: inline-flex;
 }
 
 .success-text {

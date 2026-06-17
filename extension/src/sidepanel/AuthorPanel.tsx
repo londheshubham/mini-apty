@@ -4,9 +4,20 @@ import {
   AdvanceTrigger,
   PageContext,
   RuntimeMessage,
+  WalkthroughPlayback,
 } from "../shared/messages";
-import { createWalkthrough, updateWalkthrough } from "../api/walkthroughs";
-import { cacheWalkthrough } from "../storage/walkthrough-cache.storage";
+import { ApiError } from "../api/errors";
+import {
+  createWalkthrough,
+  listWalkthroughs,
+  updateWalkthrough,
+  Walkthrough,
+} from "../api/walkthroughs";
+import {
+  cacheWalkthrough,
+  cacheWalkthroughs,
+  getCachedWalkthroughs,
+} from "../storage/walkthrough-cache.storage";
 import { useAuthStore } from "../stores/auth.store";
 import { useRecordingStore } from "../stores/recording.store";
 
@@ -14,6 +25,7 @@ type AuthorPanelProps = {
   pageContext: PageContext | null;
   onStartCapture: () => Promise<void>;
   onStopCapture: () => Promise<void>;
+  onPlayWalkthrough: (walkthrough: WalkthroughPlayback) => Promise<void>;
 };
 
 const advanceTriggers: { label: string; value: AdvanceTrigger }[] = [
@@ -41,12 +53,21 @@ const getDefaultWalkthroughName = (pageContext: PageContext | null) => {
     : `Walkthrough - ${pageContext.pathname}`;
 };
 
+const formatUpdatedAt = (value: string) => {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+};
+
 export const AuthorPanel = ({
   pageContext,
+  onPlayWalkthrough,
   onStartCapture,
   onStopCapture,
 }: AuthorPanelProps) => {
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
   const {
     addStep,
     clearSteps,
@@ -70,6 +91,15 @@ export const AuthorPanel = ({
   const [savedWalkthroughId, setSavedWalkthroughId] = useState<string | null>(
     null,
   );
+  const [savedWalkthroughs, setSavedWalkthroughs] = useState<Walkthrough[]>([]);
+  const [loadStatus, setLoadStatus] = useState<
+    "idle" | "loading" | "loaded" | "cached" | "error"
+  >("idle");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [playingWalkthroughId, setPlayingWalkthroughId] = useState<
+    string | null
+  >(null);
+  const [playError, setPlayError] = useState<string | null>(null);
 
   const isRecording = status === "recording";
   const canSave =
@@ -84,7 +114,86 @@ export const AuthorPanel = ({
     setSaveStatus("idle");
     setSaveError(null);
     setSavedWalkthroughId(null);
+    setPlayError(null);
   }, [pageContext?.origin, pageContext?.pathname]);
+
+  useEffect(() => {
+    if (!token || !user || !pageContext) {
+      setSavedWalkthroughs([]);
+      setLoadStatus("idle");
+      setLoadError(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const page = {
+      origin: pageContext.origin,
+      pathPattern: pageContext.pathname,
+    };
+
+    const loadSavedWalkthroughs = async () => {
+      setLoadStatus("loading");
+      setLoadError(null);
+
+      try {
+        const walkthroughs = await listWalkthroughs(token, {
+          origin: page.origin,
+          path: page.pathPattern,
+        });
+
+        if (isCancelled) {
+          return;
+        }
+
+        setSavedWalkthroughs(walkthroughs);
+        setLoadStatus("loaded");
+        void cacheWalkthroughs(user.id, page, walkthroughs).catch(
+          () => undefined,
+        );
+      } catch (loadErrorUnknown: unknown) {
+        if (isCancelled) {
+          return;
+        }
+
+        if (
+          loadErrorUnknown instanceof ApiError &&
+          loadErrorUnknown.kind === "network"
+        ) {
+          const cachedWalkthroughs = await getCachedWalkthroughs(
+            user.id,
+            page,
+          ).catch(() => []);
+
+          if (isCancelled) {
+            return;
+          }
+
+          setSavedWalkthroughs(cachedWalkthroughs);
+          setLoadStatus("cached");
+          setLoadError(
+            cachedWalkthroughs.length > 0
+              ? "Showing cached walkthroughs because the backend is unreachable."
+              : "Backend unreachable and no cached walkthroughs were found for this user.",
+          );
+          return;
+        }
+
+        setSavedWalkthroughs([]);
+        setLoadStatus("error");
+        setLoadError(
+          loadErrorUnknown instanceof Error
+            ? loadErrorUnknown.message
+            : "Could not load walkthroughs",
+        );
+      }
+    };
+
+    void loadSavedWalkthroughs();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [pageContext?.origin, pageContext?.pathname, token, user]);
 
   useEffect(() => {
     const handleMessage = (message: RuntimeMessage) => {
@@ -141,7 +250,7 @@ export const AuthorPanel = ({
   };
 
   const handleSave = async () => {
-    if (!token || !pageContext || steps.length === 0) {
+    if (!token || !user || !pageContext || steps.length === 0) {
       return;
     }
 
@@ -159,10 +268,16 @@ export const AuthorPanel = ({
         ? await updateWalkthrough(token, savedWalkthroughId, input)
         : await createWalkthrough(token, input);
 
-      await cacheWalkthrough(walkthrough);
+      void cacheWalkthrough(user.id, walkthrough).catch(() => undefined);
 
       setSaveStatus("saved");
-      setSavedWalkthroughId(walkthrough.id);
+      setSavedWalkthroughs((currentWalkthroughs) => [
+        walkthrough,
+        ...currentWalkthroughs.filter((item) => item.id !== walkthrough.id),
+      ]);
+      clearSteps();
+      setWalkthroughName(getDefaultWalkthroughName(pageContext));
+      setSavedWalkthroughId(null);
     } catch (saveErrorUnknown: unknown) {
       setSaveStatus("error");
       setSaveError(
@@ -170,6 +285,27 @@ export const AuthorPanel = ({
           ? saveErrorUnknown.message
           : "Could not save walkthrough",
       );
+    }
+  };
+
+  const handlePlayWalkthrough = async (walkthrough: Walkthrough) => {
+    setPlayingWalkthroughId(walkthrough.id);
+    setPlayError(null);
+
+    try {
+      await onPlayWalkthrough({
+        id: walkthrough.id,
+        name: walkthrough.name,
+        steps: walkthrough.steps,
+      });
+    } catch (playErrorUnknown: unknown) {
+      setPlayError(
+        playErrorUnknown instanceof Error
+          ? playErrorUnknown.message
+          : "Could not play walkthrough",
+      );
+    } finally {
+      setPlayingWalkthroughId(null);
     }
   };
 
@@ -199,6 +335,76 @@ export const AuthorPanel = ({
           <strong>Capture error</strong>
           <span>{error}</span>
         </div>
+      ) : null}
+
+      {token && user && pageContext ? (
+        <section className="saved-walkthroughs">
+          <div className="saved-walkthroughs-header">
+            <div>
+              <h3>Saved walkthroughs</h3>
+              {loadStatus === "loading" ? (
+                <p className="muted">Loading walkthroughs...</p>
+              ) : loadStatus === "cached" && loadError ? (
+                <p className="muted">{loadError}</p>
+              ) : (
+                <p className="muted">
+                  {savedWalkthroughs.length === 1
+                    ? "1 walkthrough for this page."
+                    : `${savedWalkthroughs.length} walkthroughs for this page.`}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {loadStatus === "error" && loadError ? (
+            <div className="error-box">
+              <strong>Load error</strong>
+              <span>{loadError}</span>
+            </div>
+          ) : null}
+
+          {playError ? (
+            <div className="error-box">
+              <strong>Playback error</strong>
+              <span>{playError}</span>
+            </div>
+          ) : null}
+
+          {savedWalkthroughs.length > 0 ? (
+            <div className="saved-walkthrough-list">
+              {savedWalkthroughs.map((walkthrough) => (
+                <article className="saved-walkthrough" key={walkthrough.id}>
+                  <div>
+                    <h4>{walkthrough.name}</h4>
+                    <p className="muted">
+                      {walkthrough.steps.length === 1
+                        ? "1 step"
+                        : `${walkthrough.steps.length} steps`}{" "}
+                      - Updated {formatUpdatedAt(walkthrough.updatedAt)}
+                    </p>
+                  </div>
+                  <div className="saved-walkthrough-actions">
+                    {loadStatus === "cached" ? (
+                      <span className="cache-pill">Cached</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={
+                        isRecording || playingWalkthroughId === walkthrough.id
+                      }
+                      onClick={() => void handlePlayWalkthrough(walkthrough)}
+                    >
+                      {playingWalkthroughId === walkthrough.id ? "Playing..." : "Play"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : loadStatus !== "loading" && loadStatus !== "error" ? (
+            <p className="muted">No saved walkthroughs for this page yet.</p>
+          ) : null}
+        </section>
       ) : null}
 
       {steps.length === 0 ? (
@@ -272,8 +478,8 @@ export const AuthorPanel = ({
                     value={step.advanceTrigger}
                     onChange={(event) => {
                       updateStep(step.id, {
-                        advanceTrigger:
-                          event.currentTarget.value as AdvanceTrigger,
+                        advanceTrigger: event.currentTarget
+                          .value as AdvanceTrigger,
                       });
                       setSaveStatus("idle");
                       setSaveError(null);
@@ -305,14 +511,19 @@ export const AuthorPanel = ({
 
       {steps.length > 0 ? (
         <div className="author-actions">
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!canSave}
-            onClick={handleSave}
+          <span
+            title={isRecording ? "Stop recording to save" : undefined}
+            className="save-button-wrapper"
           >
-            {saveStatus === "saving" ? "Saving..." : "Save walkthrough"}
-          </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!canSave}
+              onClick={handleSave}
+            >
+              {saveStatus === "saving" ? "Saving..." : "Save walkthrough"}
+            </button>
+          </span>
           <button
             type="button"
             className="text-button"

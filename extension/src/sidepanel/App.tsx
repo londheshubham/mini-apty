@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ContentResponse,
   ExtensionMessage,
   pageContextSchema,
   PageContext,
+  WalkthroughPlayback,
 } from "../shared/messages";
 import { useAuthStore } from "../stores/auth.store";
 import { AuthorPanel } from "./AuthorPanel";
@@ -110,35 +111,117 @@ const sendCaptureCommand = async (
   }
 };
 
+const sendPlayWalkthroughCommand = async (walkthrough: WalkthroughPlayback) => {
+  const tab = await getActiveTab();
+
+  if (!tab.id) {
+    throw new Error("No active tab found");
+  }
+
+  if (!canInjectIntoTab(tab.url)) {
+    throw new Error("Open an http or https page to use Mini Apty");
+  }
+
+  let response: ContentResponse;
+
+  try {
+    response = await sendContentScriptMessage(tab.id, {
+      type: "MINI_APTY_PLAY_WALKTHROUGH",
+      walkthrough,
+    });
+  } catch {
+    await injectContentScript(tab.id);
+    response = await sendContentScriptMessage(tab.id, {
+      type: "MINI_APTY_PLAY_WALKTHROUGH",
+      walkthrough,
+    });
+  }
+
+  if (!response.ok) {
+    throw new Error(response.error);
+  }
+};
+
 export const App = () => {
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [status, setStatus] = useState("Loading current tab...");
   const [isLoading, setIsLoading] = useState(false);
+  const pageContextRequestIdRef = useRef(0);
   const loadSession = useAuthStore((state) => state.loadSession);
 
-  const loadPageContext = async () => {
+  const loadPageContext = useCallback(async () => {
+    const requestId = pageContextRequestIdRef.current + 1;
+    pageContextRequestIdRef.current = requestId;
+
     setIsLoading(true);
     setStatus("Connecting to this page...");
+    setPageContext(null);
 
     try {
       const context = await requestPageContext();
 
+      if (pageContextRequestIdRef.current !== requestId) {
+        return;
+      }
+
       setPageContext(context);
       setStatus("Connected to this page");
     } catch (error: unknown) {
+      if (pageContextRequestIdRef.current !== requestId) {
+        return;
+      }
+
       setPageContext(null);
       setStatus(
         error instanceof Error ? error.message : "Could not connect to this page",
       );
     } finally {
-      setIsLoading(false);
+      if (pageContextRequestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadPageContext();
     void loadSession();
-  }, []);
+  }, [loadPageContext, loadSession]);
+
+  useEffect(() => {
+    const handleActivated = () => {
+      void loadPageContext();
+    };
+
+    const handleUpdated = (
+      _tabId: number,
+      changeInfo: { status?: string; url?: string },
+      tab: chrome.tabs.Tab,
+    ) => {
+      if (!tab.active || (!changeInfo.url && changeInfo.status !== "complete")) {
+        return;
+      }
+
+      void loadPageContext();
+    };
+
+    const handleWindowFocusChanged = (windowId: number) => {
+      if (windowId === chrome.windows.WINDOW_ID_NONE) {
+        return;
+      }
+
+      void loadPageContext();
+    };
+
+    chrome.tabs.onActivated.addListener(handleActivated);
+    chrome.tabs.onUpdated.addListener(handleUpdated);
+    chrome.windows.onFocusChanged.addListener(handleWindowFocusChanged);
+
+    return () => {
+      chrome.tabs.onActivated.removeListener(handleActivated);
+      chrome.tabs.onUpdated.removeListener(handleUpdated);
+      chrome.windows.onFocusChanged.removeListener(handleWindowFocusChanged);
+    };
+  }, [loadPageContext]);
 
   return (
     <main className="app-shell">
@@ -182,6 +265,7 @@ export const App = () => {
         pageContext={pageContext}
         onStartCapture={() => sendCaptureCommand("MINI_APTY_START_CAPTURE")}
         onStopCapture={() => sendCaptureCommand("MINI_APTY_STOP_CAPTURE")}
+        onPlayWalkthrough={sendPlayWalkthroughCommand}
       />
     </main>
   );

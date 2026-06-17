@@ -2,19 +2,58 @@ import { Walkthrough } from "../api/walkthroughs";
 
 const WALKTHROUGH_CACHE_STORAGE_KEY = "miniAptyWalkthroughCache";
 
-type WalkthroughCache = Record<string, Walkthrough[]>;
+type WalkthroughPage = Pick<Walkthrough, "origin" | "pathPattern">;
+type WalkthroughCache = Record<string, Record<string, Walkthrough[]>>;
 
-const getCacheKey = (walkthrough: Pick<Walkthrough, "origin" | "pathPattern">) => {
+const getCacheKey = (walkthrough: WalkthroughPage) => {
   return `${walkthrough.origin}${walkthrough.pathPattern}`;
 };
 
-export const cacheWalkthrough = async (walkthrough: Walkthrough) => {
+const readCache = async () => {
   const stored = await chrome.storage.local.get(WALKTHROUGH_CACHE_STORAGE_KEY);
-  const cache =
+
+  return (
     (stored[WALKTHROUGH_CACHE_STORAGE_KEY] as WalkthroughCache | undefined) ??
-    {};
+    {}
+  );
+};
+
+export const getCachedWalkthroughs = async (
+  userId: string,
+  page: WalkthroughPage,
+) => {
+  const cache = await readCache();
+
+  return cache[userId]?.[getCacheKey(page)] ?? [];
+};
+
+export const cacheWalkthroughs = async (
+  userId: string,
+  page: WalkthroughPage,
+  walkthroughs: Walkthrough[],
+) => {
+  const cache = await readCache();
+  const cacheKey = getCacheKey(page);
+
+  await chrome.storage.local.set({
+    [WALKTHROUGH_CACHE_STORAGE_KEY]: {
+      ...cache,
+      [userId]: {
+        ...(cache[userId] ?? {}),
+        [cacheKey]: walkthroughs,
+      },
+    },
+  });
+};
+
+export const cacheWalkthrough = async (
+  userId: string,
+  walkthrough: Walkthrough,
+) => {
+  const cache = await readCache();
   const cacheKey = getCacheKey(walkthrough);
-  const cachedWalkthroughs = cache[cacheKey] ?? [];
+  const userCache = cache[userId] ?? {};
+  const cachedWalkthroughs = userCache[cacheKey] ?? [];
   const nextWalkthroughs = [
     walkthrough,
     ...cachedWalkthroughs.filter((item) => item.id !== walkthrough.id),
@@ -23,7 +62,10 @@ export const cacheWalkthrough = async (walkthrough: Walkthrough) => {
   await chrome.storage.local.set({
     [WALKTHROUGH_CACHE_STORAGE_KEY]: {
       ...cache,
-      [cacheKey]: nextWalkthroughs,
+      [userId]: {
+        ...userCache,
+        [cacheKey]: nextWalkthroughs,
+      },
     },
   });
 };

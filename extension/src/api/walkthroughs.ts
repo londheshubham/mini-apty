@@ -17,23 +17,27 @@ const pointerStrategySchema = z.enum([
 ]);
 
 const elementPointerSchema = z.object({
-  strategy: pointerStrategySchema,
+  strategy: pointerStrategySchema.catch("css-selector"),
   selector: z.string().min(1),
-  candidateSelectors: z.array(z.string().min(1)),
-  fallbackPath: z.string().min(1),
+  candidateSelectors: z.array(z.string().min(1)).optional(),
+  fallbackPath: z.string().min(1).optional(),
   text: z.string().optional(),
   textFingerprint: z.string().optional(),
   role: z.string().optional(),
   tagName: z.string().optional(),
   attributes: z.record(z.string(), z.string()).optional(),
-}) satisfies z.ZodType<ElementPointer>;
+}).transform((pointer) => ({
+  ...pointer,
+  candidateSelectors: pointer.candidateSelectors ?? [pointer.selector],
+  fallbackPath: pointer.fallbackPath ?? pointer.selector,
+})) satisfies z.ZodType<ElementPointer>;
 
 const walkthroughStepSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().min(1),
   element: elementPointerSchema,
-  advanceTrigger: advanceTriggerSchema,
+  advanceTrigger: advanceTriggerSchema.optional().default("next-button"),
 }) satisfies z.ZodType<CapturedStep>;
 
 const walkthroughSchema = z.object({
@@ -53,6 +57,27 @@ export type CreateWalkthroughInput = {
   origin: string;
   pathPattern: string;
   steps: CapturedStep[];
+};
+
+export type ListWalkthroughsInput = {
+  origin: string;
+  path: string;
+};
+
+export const listWalkthroughs = async (
+  token: string,
+  input: ListWalkthroughsInput,
+) => {
+  const query = new URLSearchParams({
+    origin: input.origin,
+    path: input.path,
+  });
+  const response = await apiRequest<unknown>(`/walkthroughs?${query.toString()}`, {
+    method: "GET",
+    token,
+  });
+
+  return z.array(walkthroughSchema).parse(response);
 };
 
 export const createWalkthrough = async (

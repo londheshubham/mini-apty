@@ -30,6 +30,12 @@ export type CapturedStep = {
   advanceTrigger: AdvanceTrigger;
 };
 
+export type WalkthroughPlayback = {
+  id: string;
+  name: string;
+  steps: CapturedStep[];
+};
+
 export type ExtensionMessage =
   | {
       type: "MINI_APTY_GET_PAGE_CONTEXT";
@@ -42,6 +48,10 @@ export type ExtensionMessage =
     }
   | {
       type: "MINI_APTY_STOP_CAPTURE";
+    }
+  | {
+      type: "MINI_APTY_PLAY_WALKTHROUGH";
+      walkthrough: WalkthroughPlayback;
     };
 
 export type RuntimeMessage =
