@@ -11,6 +11,7 @@ type RecordingState = {
   startRecording: () => void;
   stopRecording: () => void;
   addStep: (step: CapturedStep) => void;
+  replaceSteps: (steps: CapturedStep[]) => void;
   updateStep: (
     id: string,
     input: Partial<
@@ -43,6 +44,12 @@ export const useRecordingStore = create<RecordingState>((set) => ({
       steps: [...state.steps, step],
       error: null,
     }));
+  },
+  replaceSteps: (steps) => {
+    set({
+      steps,
+      error: null,
+    });
   },
   updateStep: (id, input) => {
     set((state) => ({

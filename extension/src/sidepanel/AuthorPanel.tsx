@@ -75,6 +75,7 @@ export const AuthorPanel = ({
     clearSteps,
     deleteStep,
     error,
+    replaceSteps,
     setError,
     startRecording,
     status,
@@ -316,6 +317,16 @@ export const AuthorPanel = ({
     }
   };
 
+  const handleEditWalkthrough = (walkthrough: Walkthrough) => {
+    setWalkthroughName(walkthrough.name);
+    replaceSteps(walkthrough.steps);
+    setSavedWalkthroughId(walkthrough.id);
+    setSaveStatus("idle");
+    setSaveError(null);
+    setPlayError(null);
+    setDeleteError(null);
+  };
+
   const handleDeleteWalkthrough = async (walkthrough: Walkthrough) => {
     if (!token || !user) {
       return;
@@ -444,6 +455,18 @@ export const AuthorPanel = ({
                     </button>
                     <button
                       type="button"
+                      className="secondary-button"
+                      disabled={
+                        isRecording ||
+                        playingWalkthroughId === walkthrough.id ||
+                        deletingWalkthroughId === walkthrough.id
+                      }
+                      onClick={() => handleEditWalkthrough(walkthrough)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
                       className="text-button danger-button"
                       disabled={
                         playingWalkthroughId === walkthrough.id ||
@@ -478,7 +501,9 @@ export const AuthorPanel = ({
         <section className="draft-editor">
           <div className="draft-editor-header">
             <div>
-              <h3>Draft walkthrough</h3>
+              <h3>
+                {savedWalkthroughId ? "Editing walkthrough" : "Draft walkthrough"}
+              </h3>
               <p className="muted">
                 {steps.length === 1 ? "1 recorded step" : `${steps.length} recorded steps`}
               </p>
@@ -595,7 +620,11 @@ export const AuthorPanel = ({
               disabled={!canSave}
               onClick={handleSave}
             >
-              {saveStatus === "saving" ? "Saving..." : "Save walkthrough"}
+              {saveStatus === "saving"
+                ? "Saving..."
+                : savedWalkthroughId
+                  ? "Update walkthrough"
+                  : "Save walkthrough"}
             </button>
           </span>
           <button
