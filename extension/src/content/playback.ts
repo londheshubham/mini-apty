@@ -1,11 +1,10 @@
 import { computePosition, flip, offset, shift } from "@floating-ui/dom";
 
 import { CapturedStep, WalkthroughPlayback } from "../shared/messages";
-import { getRole } from "./element-pointer";
+import { attachAdvanceTrigger, clearAdvanceTrigger } from "./playback-advance";
+import { resolvePlaybackTarget } from "./playback-target";
 import {
   getOverlayElements,
-  isElementVisible,
-  isOverlayElement,
   setBadgeText,
   updateHighlight,
 } from "./overlay";
@@ -15,6 +14,8 @@ const ADVANCE_TRIGGER_HINTS = {
   "input-change": "Change the highlighted field to continue.",
   "next-button": "Click Next to continue.",
 } satisfies Record<CapturedStep["advanceTrigger"], string>;
+const TARGET_WAIT_TIMEOUT_MS = 3000;
+const TARGET_RETRY_INTERVAL_MS = 150;
 
 type PlaybackOptions = {
   isCaptureActive: () => boolean;
@@ -26,139 +27,9 @@ let activePlayback: {
   stepIndex: number;
 } | null = null;
 let playbackFrame = 0;
-let activeAdvanceCleanup: (() => void) | null = null;
-
-const getVisibleElementsForSelector = (selector: string) => {
-  try {
-    return [...document.querySelectorAll(selector)].filter(
-      (element): element is HTMLElement =>
-        element instanceof HTMLElement &&
-        !isOverlayElement(element) &&
-        isElementVisible(element),
-    );
-  } catch {
-    return [];
-  }
-};
-
-const getSearchableElementText = (element: HTMLElement) => {
-  if (
-    element instanceof HTMLInputElement ||
-    element instanceof HTMLTextAreaElement
-  ) {
-    return (
-      element.getAttribute("aria-label") ??
-      element.placeholder ??
-      element.value ??
-      element.name ??
-      ""
-    )
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
-  }
-
-  return (
-    element.getAttribute("aria-label") ??
-    element.innerText ??
-    element.textContent ??
-    ""
-  )
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-};
-
-const getPlaybackTargetScore = (step: CapturedStep, element: HTMLElement) => {
-  let score = 0;
-  const tagName = element.tagName.toLowerCase();
-  const role = getRole(element);
-  const text = getSearchableElementText(element);
-  const expectedText = (
-    step.element.textFingerprint ??
-    step.element.text ??
-    ""
-  ).toLowerCase();
-
-  if (step.element.tagName && step.element.tagName === tagName) {
-    score += 2;
-  }
-
-  if (step.element.role && step.element.role === role) {
-    score += 3;
-  }
-
-  if (step.element.attributes) {
-    for (const [name, value] of Object.entries(step.element.attributes)) {
-      if (element.getAttribute(name) === value) {
-        score += 2;
-      }
-    }
-  }
-
-  if (expectedText && text) {
-    if (text === expectedText) {
-      score += 8;
-    } else if (text.includes(expectedText)) {
-      score += 6;
-    } else if (expectedText.includes(text)) {
-      score += 4;
-    }
-  }
-
-  return score;
-};
-
-const hasStrongPlaybackHints = (step: CapturedStep) => {
-  return Boolean(
-    step.element.textFingerprint ||
-      step.element.text ||
-      step.element.role ||
-      Object.keys(step.element.attributes ?? {}).length > 0,
-  );
-};
-
-const isBroadPlaybackSelector = (selector: string, matchCount: number) => {
-  return /^[a-z][a-z0-9-]*$/i.test(selector.trim()) || matchCount > 5;
-};
-
-const resolvePlaybackTarget = (step: CapturedStep) => {
-  const selectors = [
-    step.element.selector,
-    ...step.element.candidateSelectors,
-    step.element.fallbackPath,
-  ].filter((selector, index, allSelectors) => {
-    return Boolean(selector) && allSelectors.indexOf(selector) === index;
-  });
-  const requiresHints = hasStrongPlaybackHints(step);
-
-  for (const selector of selectors) {
-    const elements = getVisibleElementsForSelector(selector);
-
-    if (elements.length === 0) {
-      continue;
-    }
-
-    const scoredElements = elements
-      .map((element) => ({
-        element,
-        score: getPlaybackTargetScore(step, element),
-      }))
-      .sort((first, second) => second.score - first.score);
-    const bestMatch = scoredElements[0];
-    const selectorIsBroad = isBroadPlaybackSelector(selector, elements.length);
-
-    if (bestMatch.score >= 4) {
-      return bestMatch.element;
-    }
-
-    if (!requiresHints && !selectorIsBroad) {
-      return bestMatch.element;
-    }
-  }
-
-  return null;
-};
+let targetRetryTimer = 0;
+let activeStepWaitKey = "";
+let activeStepWaitStartedAt = 0;
 
 const positionPlaybackPopover = async (
   target: HTMLElement | null,
@@ -208,9 +79,51 @@ const createPopoverButton = (
   return button;
 };
 
-const clearAdvanceTrigger = () => {
-  activeAdvanceCleanup?.();
-  activeAdvanceCleanup = null;
+const clearTargetRetry = () => {
+  if (!targetRetryTimer) {
+    return;
+  }
+
+  window.clearTimeout(targetRetryTimer);
+  targetRetryTimer = 0;
+};
+
+const getActiveStepWaitElapsed = () => {
+  return Date.now() - activeStepWaitStartedAt;
+};
+
+const syncActiveStepWait = (
+  walkthrough: WalkthroughPlayback,
+  stepIndex: number,
+  step: CapturedStep,
+) => {
+  const stepKey = `${walkthrough.id}:${step.id}:${stepIndex}`;
+
+  if (activeStepWaitKey === stepKey) {
+    return;
+  }
+
+  activeStepWaitKey = stepKey;
+  activeStepWaitStartedAt = Date.now();
+};
+
+const scheduleTargetRetry = () => {
+  if (targetRetryTimer || !activePlayback) {
+    return;
+  }
+
+  targetRetryTimer = window.setTimeout(() => {
+    targetRetryTimer = 0;
+    showPlaybackStep();
+  }, TARGET_RETRY_INTERVAL_MS);
+};
+
+const getActiveStep = () => {
+  if (!activePlayback) {
+    return null;
+  }
+
+  return activePlayback.walkthrough.steps[activePlayback.stepIndex] ?? null;
 };
 
 const showPlaybackStep = () => {
@@ -218,17 +131,21 @@ const showPlaybackStep = () => {
     return;
   }
 
+  clearTargetRetry();
   clearAdvanceTrigger();
 
   const { popover } = getOverlayElements();
   const { stepIndex, walkthrough } = activePlayback;
   const step = walkthrough.steps[stepIndex];
+  syncActiveStepWait(walkthrough, stepIndex, step);
 
   if (!popover) {
     return;
   }
 
   const target = resolvePlaybackTarget(step);
+  const isWaitingForTarget =
+    !target && getActiveStepWaitElapsed() < TARGET_WAIT_TIMEOUT_MS;
 
   if (target) {
     target.scrollIntoView({
@@ -266,7 +183,12 @@ const showPlaybackStep = () => {
   hint.textContent = ADVANCE_TRIGGER_HINTS[step.advanceTrigger];
   body.append(hint);
 
-  if (!target) {
+  if (isWaitingForTarget) {
+    const pending = document.createElement("p");
+    pending.className = "mini-apty-popover-warning";
+    pending.textContent = "Waiting for the target to appear...";
+    body.append(pending);
+  } else if (!target) {
     const warning = document.createElement("p");
     warning.className = "mini-apty-popover-warning";
     warning.textContent = "Target not found on this page.";
@@ -325,8 +247,16 @@ const showPlaybackStep = () => {
 
   popover.replaceChildren(header, body);
   popover.style.display = "block";
-  attachAdvanceTrigger(step, target);
+  attachAdvanceTrigger(step, target, {
+    advancePlayback,
+    getActiveStep,
+    resolveTarget: resolvePlaybackTarget,
+  });
   schedulePlaybackUpdate();
+
+  if (isWaitingForTarget) {
+    scheduleTargetRetry();
+  }
 };
 
 const advancePlayback = () => {
@@ -349,42 +279,6 @@ const advancePlayback = () => {
   showPlaybackStep();
 };
 
-const attachAdvanceTrigger = (
-  step: CapturedStep,
-  target: HTMLElement | null,
-) => {
-  clearAdvanceTrigger();
-
-  if (!target || step.advanceTrigger === "next-button") {
-    return;
-  }
-
-  let didAdvance = false;
-  const handleAdvance = () => {
-    if (didAdvance) {
-      return;
-    }
-
-    didAdvance = true;
-    advancePlayback();
-  };
-
-  if (step.advanceTrigger === "click-target") {
-    target.addEventListener("click", handleAdvance, true);
-    activeAdvanceCleanup = () => {
-      target.removeEventListener("click", handleAdvance, true);
-    };
-    return;
-  }
-
-  target.addEventListener("input", handleAdvance, true);
-  target.addEventListener("change", handleAdvance, true);
-  activeAdvanceCleanup = () => {
-    target.removeEventListener("input", handleAdvance, true);
-    target.removeEventListener("change", handleAdvance, true);
-  };
-};
-
 const updatePlaybackPlacement = () => {
   if (!activePlayback) {
     return;
@@ -395,6 +289,14 @@ const updatePlaybackPlacement = () => {
   const target = resolvePlaybackTarget(step);
 
   updateHighlight(target);
+
+  if (target) {
+    attachAdvanceTrigger(step, target, {
+      advancePlayback,
+      getActiveStep,
+      resolveTarget: resolvePlaybackTarget,
+    });
+  }
 
   if (popover) {
     void positionPlaybackPopover(target, popover);
@@ -420,8 +322,11 @@ const schedulePlaybackUpdate = () => {
 export const stopPlayback = () => {
   const { popover } = getOverlayElements();
 
+  clearTargetRetry();
   clearAdvanceTrigger();
   activePlayback = null;
+  activeStepWaitKey = "";
+  activeStepWaitStartedAt = 0;
 
   if (playbackFrame) {
     window.cancelAnimationFrame(playbackFrame);
